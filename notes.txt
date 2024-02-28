@@ -1,0 +1,168 @@
+auth Routes:
+* all routes are private by default. To change/add or make public check routes.ts in root.
+
+
+register
+  - RegisterSchema
+  - validate fields on server
+  - hash password and make sure email not in use.
+  - create user and send verification email.
+  - email contains link to /auth/new-verification with token in params
+new-verification
+  - just displays component that tells user if they have been verified.
+login
+new-password
+reset
+error
+
+auth server actions
+    - All auth server actions return a AuthActionReturn object that is a message
+      back to the user of success, error or twoFactor
+register
+new-verification
+login
+new-password
+reset
+
+
+Register
+
+using credentials:
+
+1. app/auth/register/page.tsx -> simple route that shows the RegisterForm component
+2. components/auth/register-form.tsx ->
+        a. Used CardWrapper
+        b. useForm from react-hook-form. used zodResolver with RegisterSchema
+           which is a z.object({})
+        c. used shadcn form components https://ui.shadcn.com/docs/components/form
+        d. made form-error and success components for under submit button.
+        e. Formfields handle their own errors
+        f. onSubmit function returns {error:string, success:string}
+3. onSubmit calls register().
+4. [register.ts] register() is a server action.
+        a. we validate fields first using our RegisterSchema
+           from zod.
+        b. hash the password.
+        c. check for existing user with that email.
+        d. create the new user.
+
+        [tokens.ts]
+        e. create a verification token.
+            i. generate token using uuid(). expiry date using new Date(future)
+            ii. make sure there is no existing token for that email. delete it
+                if there is.
+            iii. create new token with email, token(uuid), expiry.
+        f. send that verification token to user email.
+5. [mail.ts] when user clicks on verification email, send them to:
+   /aut/new-verification?token={token}.
+6. [app/auth/new-verification] -> render NewVerificationForm
+7. [components/auth/NewVerificationForm] get token from searchParams.
+    Its called a form, but all this compnent does is call newVerificaton server action
+    and display success or error to user.
+        a. useEffect calls onSubmit() on initial render.
+        b. onSubmit inside useCallback. best to use useCallback because it
+           is a dependency of useEffect. onSubmit might cause rerenders as its
+           signature changes every time this component is rerendered.
+        c. pass token to NewVerification server action then pass success/error
+8. [actions/new-verification.ts]
+        a. get the token using getVerificationTokenByToken from [/data/ver-token]
+        b. make sure it exists, hasn't expired.
+        c. get the user asscoiated with token using email from token
+        d. update the db to show email is verified.
+
+using social:
+
+1. [components/auth/social.tsx]
+        a. user clicks on button which determines which provier is used.
+        b. signIn() from next-auth/react is called
+        c. signIn("provider", {callbackUrl:string (for redirect url)})
+        d. the linkAccount event in [auth.ts] gets triggered. update db.user
+           to show emailVerified.
+
+
+USER IS NOW REGISTERED.
+
+==========================================================================
+
+Login
+1. [app/auth/login] -> render loginForm
+2. [components/auth/login-form.tsx]
+        a. useForm with LoginSchema
+        b. onSubmit()
+            i. reset errors ("")
+            ii. startTransition -> isPending becomes true.
+            iii. call login server action passing in values.
+3. [actions/login.ts]
+        a. validate fields
+        b. get user from db using email
+        c. if user has not verfied email, don't let them login.
+            i. generate new verificaiton token
+            ii. send verification emailVerified
+            iii. return out of funtion before signing in.
+        d. if 2FA is enabled, don't let them sign in before verifying.
+            i. if code is null inside values from login, it means that we
+               haven't generated and sent a twofactorverification token yet.
+            ii. generate twoFactorToken with user email. inside generate token function:
+                1. check for existing token with that email and delete it if it exists.
+                2. db.twoFactorToken.create new token using: email, token(6 digit code), expires
+                3. return token and {twoFactor: true} so that the token input displays
+                   inside of loginForm. This will change the text on the button from Login to Confirm and
+                   onClick will now have the "code" property for when login server action
+                   runs again.
+            iii. send email with 6 digit code.
+            iv. with twoFactor being set to true, the code input now displays
+            v. login runs again this time with the code !== null.
+                1. get the twoFactorToken by existingUser.email.
+                    a. if it doesn't exist, return error
+                    b. if the code is wrong, return error
+                    c. if the code has epired, return error
+                2. delete the twoFactorToken from db. we don't need it anymore it has been checked.
+                3. check for existing confirmation for userId and delete it if exists.
+                4. create new confirmation. This confirmation is checked in auth.ts for nextAuth signIn event
+                    only if twoFactor is enabled for user.
+4. auth.ts
+    a. The signIn event gets triggered.
+        i. if provider is anything but "credentials" allow the sign in.
+        ii. check for user in db using user.id.
+        iii. don't allow login if email is yet unverified.
+        iv. if twofactorverification is enabled, don't allow login until user owns
+            a twoFactorConfirmation token in db.
+        v. delete the twoFactorConfirmation token after its been confirmed. This forces
+           user to twoFactor authenticate every login.
+        iv. return true and allow the login to continue.
+
+USER IS NOW LOGGED IN
+
+==========================================================================
+
+reset password
+
+1. [app/auth/reset] -> render ResetForm
+2. ResetForm allows user to send email to reset password. Submit calls
+   reset server action.
+3. reset action
+    a. validate fields on server
+    b. get email and find user in db.
+    c. generate password reset token using email
+        i. check for existing password reset token and delete if exists.
+        ii. create new token using email, token, expiry
+    c. generatePasswordResetToken(email) and send Password reset email. link token to
+       auth/new-password route.
+4. new-password route displays newPasswordForm
+5. NewPasswordForm
+    a. get token from params.
+        i. call newPassword server action with values, token
+6. NewPassword server action
+    a. if no token return error.
+    b. validate fields on server
+    c. get password from field
+    d. get existing token from db.
+        i. check exists and expiry
+    e. get user using existing token.email
+    f. hash password and update user password
+    g. delete token
+
+
+PASSWORD IS RESET
+
+==========================================================================
