@@ -31,10 +31,7 @@ export const {
       // Allow OAuth without email verification
       if (account?.provider !== "credentials") return true;
 
-      if (!user || !user.id) {
-        return false;
-      }
-      const existingUser = await getUserById(user.id);
+      const existingUser = await getUserById(user.id as string);
 
       // Prevent sign in without email verification
       if (!existingUser?.emailVerified) return false;
@@ -45,7 +42,7 @@ export const {
 
         if (!twoFactorConfirmation) return false;
 
-        // Delete two factor confirmation for next sign in. could check date here if you don't want to MFA on every login
+        // Delete two factor confirmation for next sign in
         await db.twoFactorConfirmation.delete({
           where: { id: twoFactorConfirmation.id },
         });
